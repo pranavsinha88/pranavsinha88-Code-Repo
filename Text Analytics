@@ -1,0 +1,460 @@
+if(!"tm" %in% installed.packages()) install.packages("tm")
+if(!"NLP" %in% installed.packages()) install.packages("NLP")
+if(!"e1071" %in% installed.packages()) install.packages("e1071")
+if(!"dplyr" %in% installed.packages()) install.packages("dplyr")
+if(!"party" %in% installed.packages()) install.packages("party")
+if(!"ROCR" %in% installed.packages()) install.packages("ROCR")
+if(!"randomForest" %in% installed.packages()) install.packages("randomForest")
+if(!"caret" %in% installed.packages()) install.packages("caret")
+if(!"xlsx" %in% installed.packages()) install.packages("xlsx")
+
+library (xlsx)
+library (tm)
+library(NLP)
+library(e1071)
+library(randomForest)
+library(dplyr) # Data wrangling, pipe operator %>%().
+library(caret) #to partition data and to check accuracy
+
+
+####### reading the data################
+
+wd <- setwd("D:\\358875_d drive\\ABB\\Testing")
+
+Data <- read.csv("3YearsData_RC_314.csv",header=TRUE)
+
+nrow(Data)
+
+##########taking sample of desired size (e.g. here 40%)################
+
+sample1 <- sample(1:nrow(Data),ceiling(nrow(Data)*.40))
+
+sample.data <- Data[sample1,]
+
+write.csv(sample.data,file="sample.modeldata.csv")
+
+#############################################################################################
+
+### Clean the master data################ 
+
+data.to.clean <- read.csv("3YearsData_RC_314.csv")
+
+dataworking <- data.to.clean  ### GIVE DATA SET NAME TO BE CLEANED
+names(dataworking)
+# You need to use one variable at a time
+varName = c("Dispute")   ### THIS IS THE VARIABLE(CONTENTS) THAT NEEDS TO BE CLEANED
+newVarName=c("cleansed")
+removeEmails  = TRUE
+removeUrls = TRUE
+removePhoneNumber = TRUE
+removeNumber = TRUE
+removePunctuations = TRUE
+removeStopwords = TRUE
+stripWhitespaces = TRUE
+stemDoc = TRUE
+
+dataHandling <- function(varName, newVarName)
+                         {
+  
+  # Regular expressions to match 1. Email, 2. URL, 3. Phone number
+  #---------------------------------------------------------------
+  
+  email.expression <- "[A-Za-z0-9-]+[.A-Za-z0-9-]*@[A-Za-z0-9-]+(\\.com|\\.co.in|\\.net|\\.org|\\.info|\\.edu|\\.mil|\\.gov|\\.biz|\\.ws|\\.us|\\.tv|\\.cc|\\.aero|\\.arpa|\\.coop|\\.int|\\.jobs|\\.museum|\\.name|\\.pro)|\\.travel|\\.nato)"
+  url.expression <- "(http://|https://|www.)[[:alnum:]~!#$%&+-=?,:/;._]*"
+  phonenumber.expression <- "\\+?(\\d{2,3})[- ]?\\(?(\\d{3,5})\\)?[- ]?(\\d{3,5})[- ]?(\\d{4})?"
+  
+  # To read data from a single csv file and create a dataset of required column
+  #----------------------------------------------------------------------------
+  varIndex <- which(colnames(dataworking)==varName)
+  
+  corpus <- tolower(dataworking[,varIndex])
+  
+  # To remove emails from dataset
+  #----------------------------------------------------------------------------
+  
+  if(removeEmails) {
+    corpus <- gsub(email.expression,' ', corpus, ignore.case = TRUE)
+  }
+  
+  # To remove urls from dataset
+  #----------------------------------------------------------------------------
+  
+  if(removeUrls) {
+    corpus <- gsub(url.expression,' ', corpus, ignore.case = TRUE)
+  }
+  
+  # To remove phone numbers from dataset
+  #----------------------------------------------------------------------------
+  
+  if(removePhoneNumber) {
+    corpus <- gsub(phonenumber.expression,' ', corpus, ignore.case = TRUE)
+  }
+  
+  # split into distinct words
+  w <- strsplit( corpus , " " )
+  corpus1<-c()
+  for(n in 1:length(w)){
+    # calculate the length of each word
+    x <- nchar( w[[n]] )
+    
+    # keep only words with length 3 to 200
+    y <- w[[n]][ x %in% 2:200 ]
+    
+    # string 'em back together
+    y <- paste( unlist( y ), collapse = " " )
+    corpus1<- c(corpus1,y)
+  }
+  
+  
+  # To covert dataset into a Corpus; required for executing 'tm_map' functions
+  #----------------------------------------------------------------------------
+  
+  corpus <- Corpus(VectorSource(corpus1))
+  
+  # To remove stopwords from corpus
+  #----------------------------------------------------------------------------
+  
+  if(removeStopwords) {
+    corpus <- tm_map(corpus, removeWords, stopwords("english")[!(stopwords("english") %in% c("no","nor","not"))]) 
+  }
+  
+  # To remove numbers from corpus
+  #----------------------------------------------------------------------------
+  
+  if(removeNumber) {
+    corpus <- tm_map(corpus, removeNumbers)
+  }
+  
+  # To remove punctuations from corpus
+  #----------------------------------------------------------------------------
+  
+  if(removePunctuations) {
+    corpus <- tm_map(corpus, removePunctuation, preserve_intra_word_dashes = TRUE)
+  }
+  
+  
+  # To remove additional whitespaces from corpus
+  #----------------------------------------------------------------------------
+  
+  if(stripWhitespaces) {
+    corpus <- tm_map(corpus, stripWhitespace)
+  }
+  
+  # To add data post pre-processing as a new column in the original dataset
+  #----------------------------------------------------------------------------
+  
+  dataSize <- nrow(dataworking)
+  newCol <- unlist(corpus[1:dataSize])
+  
+  
+  x=NULL
+  i=1
+  
+  while(i<=length(newCol))
+  {
+    x[i] = newCol[i]
+    i=i+12
+    
+  }
+  
+  
+  newCol=x[!is.na(x)]
+  tmDataSetNew <- as.data.frame(newCol)
+  
+  newColIndex <- which(colnames(tmDataSetNew)=='newCol')
+  
+  colnames(tmDataSetNew) = paste(newVarName,varName,sep="_")
+  
+  # To clear all variable used
+  #----------------------------------------------------------------------------
+  
+  rm(list=c("filePath","fileName","fileLoc", "varName","newVarName","tmDataSet"
+            ,"corpus","newCol","newColIndex","varIndex","dataSize"))
+  dataworking <- cbind(dataworking,tmDataSetNew)
+  assign("dataworking",dataworking,envir=.GlobalEnv)
+  
+}
+
+dataHandling(varName, newVarName)
+
+
+#dataworking$cleansed_Dispute <- iconv(dataworking$cleansed_Dispute, "latin1", "ASCII", sub="")
+write.csv(dataworking,"cleansed_finaldata_314.csv")
+
+##################################################################################################
+
+############### clean the sample modeldata################
+
+data.to.clean <- read.csv("Freq_Dist_RC_314.csv")
+
+dataworking <- data.to.clean  ### GIVE DATA SET NAME TO BE CLEANED
+names(dataworking)
+# You need to use one variable at a time
+varName = c("Dispute")   ### THIS IS THE VARIABLE(CONTENTS) THAT NEEDS TO BE CLEANED
+newVarName = c("cleansed")
+removeEmails = TRUE
+removeUrls = TRUE
+removePhoneNumber = TRUE
+removeNumber = TRUE
+removePunctuations = TRUE
+removeStopwords = TRUE
+stripWhitespaces = TRUE
+stemDoc = TRUE
+
+dataHandling <- function(varName, newVarName)
+{
+  
+  
+  
+  # Regular expressions to match 1. Email, 2. URL, 3. Phone number
+  #---------------------------------------------------------------
+  
+  email.expression <- "[A-Za-z0-9-]+[.A-Za-z0-9-]*@[A-Za-z0-9-]+(\\.com|\\.co.in|\\.net|\\.org|\\.info|\\.edu|\\.mil|\\.gov|\\.biz|\\.ws|\\.us|\\.tv|\\.cc|\\.aero|\\.arpa|\\.coop|\\.int|\\.jobs|\\.museum|\\.name|\\.pro)|\\.travel|\\.nato)"
+  url.expression <- "(http://|https://|www.)[[:alnum:]~!#$%&+-=?,:/;._]*"
+  phonenumber.expression <- "\\+?(\\d{2,3})[- ]?\\(?(\\d{3,5})\\)?[- ]?(\\d{3,5})[- ]?(\\d{4})?"
+  
+  # To read data from a single csv file and create a dataset of required column
+  #----------------------------------------------------------------------------
+  varIndex <- which(colnames(dataworking)==varName)
+  
+  corpus <- tolower(dataworking[,varIndex])
+  
+  # To remove emails from dataset
+  #----------------------------------------------------------------------------
+  
+  if(removeEmails) {
+    corpus <- gsub(email.expression,' ', corpus, ignore.case = TRUE)
+  }
+  
+  # To remove urls from dataset
+  #----------------------------------------------------------------------------
+  
+  if(removeUrls) {
+    corpus <- gsub(url.expression,' ', corpus, ignore.case = TRUE)
+  }
+  
+  # To remove phone numbers from dataset
+  #----------------------------------------------------------------------------
+  
+  if(removePhoneNumber) {
+    corpus <- gsub(phonenumber.expression,' ', corpus, ignore.case = TRUE)
+  }
+  
+  # split into distinct words
+  w <- strsplit( corpus , " " )
+  corpus1<-c()
+  for(n in 1:length(w)){
+    # calculate the length of each word
+    x <- nchar( w[[n]] )
+    
+    # keep only words with length 3 to 200
+    y <- w[[n]][ x %in% 2:200 ]
+    
+    # string 'em back together
+    y <- paste( unlist( y ), collapse = " " )
+    corpus1<- c(corpus1,y)
+  }
+  
+  
+  # To covert dataset into a Corpus; required for executing 'tm_map' functions
+  #----------------------------------------------------------------------------
+  
+  corpus <- Corpus(VectorSource(corpus1))
+  
+  # To remove stopwords from corpus
+  #----------------------------------------------------------------------------
+  
+  if(removeStopwords) {
+    corpus <- tm_map(corpus, removeWords, stopwords("english")[!(stopwords("english") %in% c("no","nor","not"))]) 
+  }
+  
+  # To remove numbers from corpus
+  #----------------------------------------------------------------------------
+  
+  if(removeNumber) {
+    corpus <- tm_map(corpus, removeNumbers)
+  }
+  
+  # To remove punctuations from corpus
+  #----------------------------------------------------------------------------
+  
+  if(removePunctuations) {
+    corpus <- tm_map(corpus, removePunctuation, preserve_intra_word_dashes = TRUE)
+  }
+  
+  
+  # To remove additional whitespaces from corpus
+  #----------------------------------------------------------------------------
+  
+  if(stripWhitespaces) {
+    corpus <- tm_map(corpus, stripWhitespace)
+  }
+  
+  # To add data post pre-processing as a new column in the original dataset
+  #----------------------------------------------------------------------------
+  
+  dataSize <- nrow(dataworking)
+  newCol <- unlist(corpus[1:dataSize])
+  
+  
+  x=NULL
+  i=1
+  
+  while(i<=length(newCol))
+  {
+    x[i] = newCol[i]
+    i=i+12
+    
+  }
+  
+  
+  newCol=x[!is.na(x)]
+  tmDataSetNew <- as.data.frame(newCol)
+  
+  newColIndex <- which(colnames(tmDataSetNew)=='newCol')
+  
+  colnames(tmDataSetNew) = paste(newVarName,varName,sep="_")
+  
+  # To clear all variable used
+  #----------------------------------------------------------------------------
+  
+  rm(list=c("filePath","fileName","fileLoc", "varName","newVarName","tmDataSet"
+            ,"corpus","newCol","newColIndex","varIndex","dataSize"))
+  dataworking<-cbind(dataworking,tmDataSetNew)
+  assign("dataworking",dataworking,envir=.GlobalEnv)
+  
+}
+
+dataHandling(varName, newVarName)
+
+
+#dataworking$cleansed_Dispute <- iconv(dataworking$cleansed_Dispute, "latin1", "ASCII", sub="")
+write.csv(dataworking,"cleansed_sample.modeldata.csv")
+
+
+
+########  END OF CLEANESING DATA ########################################
+
+##############model building on data ######################
+
+
+####STARTING FOR CLASSIFICATION#####################################################
+
+dataworking <- read.csv("cleansed_sample.modeldata.csv",stringsAsFactors = FALSE)
+
+
+names(dataworking)
+
+##################### For Classification################
+mycorpus <- dataworking
+names(mycorpus)
+
+mycorpus$cleansed_Dispute <- tolower(mycorpus$cleansed_Dispute)
+
+corpus <- Corpus(VectorSource(mycorpus$cleansed_Dispute))
+
+dtm_train <- DocumentTermMatrix(corpus)
+
+sparse_tr <- as.matrix(removeSparseTerms(dtm_train, .995))
+
+col_tr <- (colnames(sparse_tr))
+col_tr1 <- col_tr
+
+class(corpus)
+
+#converting data inro dataframe
+total_tagged <- data.frame(mycorpus$Root.Cause,sparse_tr)
+
+index <- createDataPartition(total_tagged$mycorpus.Root.Cause,p=0.8,list=F)
+total_tagged_train <- total_tagged[index,]
+
+total_tagged_test=total_tagged[-index,]
+
+
+#------------- with SVM model /  Random forest on data--------------------
+
+
+model_svm1<-svm(total_tagged_train$mycorpus.Root.Cause~.,data= total_tagged_train, kernel= "linear", cross=20,probability=TRUE)
+save(model_svm1, file = "model_svm1.rda")
+summary(model_svm1)
+
+#####Predicting on same training data
+predict_svm_train<-predict(model_svm1,total_tagged_train[,2:ncol(total_tagged_train)])
+match_1 <- cbind(predict_svm_train,total_tagged_train$mycorpus.Root.Cause)
+#####checking accuaracy on training data
+svm_cm_train<-confusionMatrix(predict_svm_train, total_tagged_train$mycorpus.Root.Cause)
+
+write.xlsx(as.table(svm_cm_train$table),"svm_model_output.xlsx",sheetName ="Model Out put-train")
+write.xlsx(as.matrix(svm_cm_train$byClass[,c('Sensitivity','Specificity','Precision')]),"svm_model_output.xlsx",sheetName ="Model Out put-train2",append=TRUE)
+
+#Predicting on same TEST data
+predict_svm_test<-predict(model_svm1,total_tagged_test[,2:ncol(total_tagged_test)])
+#checking accuaracy on TEST data
+svm_cm_test<-confusionMatrix(predict_svm_test, total_tagged_test$mycorpus.Root.Cause)
+
+write.xlsx(as.table(svm_cm_test$table),"svm_model_output.xlsx",sheetName ="Model Out put-test",append = TRUE)
+write.xlsx(as.matrix(svm_cm_test$byClass[,c('Sensitivity','Specificity','Precision')]),"svm_model_output.xlsx",sheetName ="Model Out put-test2",append=TRUE)
+
+
+#####   model random Forest
+
+model_rf1<-randomForest(total_tagged_train$mycorpus.Root.Cause ~.,data= total_tagged_train, ntree=5000)
+
+write.xlsx(as.matrix(model_rf1$confusion),"RF_model_output.xlsx",sheetName ="output-Train")
+
+
+
+#### validate model on testing data ###########
+
+model_rf1_test <- predict(model_rf1,type="prob",total_tagged_test)
+
+model_rf1_test <- predict(model_rf1,total_tagged_test) #### get result wothout prob
+
+#####checking accuaracy on test data
+cm<-confusionMatrix(model_rf1_test, as.factor(total_tagged_test[,1]))
+
+write.xlsx(as.matrix(cm$table),"RF_model_output.xlsx",sheetName ="output-Test",append = TRUE)
+write.xlsx(as.matrix(cm$byClass[,c('Sensitivity','Specificity','Precision')]),"RF_model_output.xlsx",sheetName ="output-Test2",append=TRUE)
+
+
+###### end random forest #########
+
+# Predicting on Total Data base on best model
+
+
+dataworking <- read.csv("cleansed_finaldata_314.csv",stringsAsFactors = FALSE)
+
+names(dataworking)
+
+mycorpus <- dataworking
+names(mycorpus)
+
+mycorpus$cleansed_Dispute <- tolower(mycorpus$cleansed_Dispute)
+
+corpus <- Corpus(VectorSource(mycorpus$cleansed_Dispute))
+
+dtm_train <- DocumentTermMatrix(corpus,control=list(dictionary=col_tr))
+
+total_tagged <- data.frame(as.matrix(dtm_train))
+
+predict_svm_fulldata <- as.character(predict(model_rf1,total_tagged))
+
+write.csv(as.data.frame(predict_svm_fulldata),file="predict_rf_fulldata.csv")
+
+#### counting by category
+svm_summary<-as.data.frame(table(predict_svm_fulldata))
+svm_summary<-svm_summary[order(-svm_summary$Freq),]
+svm_summary$perct_freq<-svm_summary$Freq/sum(svm_summary$Freq)
+
+############## preparing final output
+
+final_output<-data.frame(root_cause_number=1,definition="",Most_Likely="",Likely="",Least_Likely="")
+
+final_output$root_cause_number<-314
+final_output$definition<-"Invoice Already Paid"
+final_output$Most_Likely<-svm_summary$predict_svm_fulldata[1]
+final_output$Likely<-svm_summary$predict_svm_fulldata[2]
+final_output$Least_Likely<-svm_summary$predict_svm_fulldata[3]
+
+write.xlsx(as.data.frame(svm_summary),"svm_model_output.xlsx",sheetName ="Freq_dist_alldata-rf",append = TRUE)
+
